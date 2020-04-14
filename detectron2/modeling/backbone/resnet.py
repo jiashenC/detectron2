@@ -393,7 +393,7 @@ class BasicStem(nn.Module):
 
 
 class ResNet(Backbone):
-    def __init__(self, stem, stages, num_classes=None, out_features=None):
+    def __init__(self, stem, stages, num_classes=None, out_features=None, multi_stage=None):
         """
         Args:
             stem (nn.Module): a stem module
@@ -444,6 +444,12 @@ class ResNet(Backbone):
         for out_feature in self._out_features:
             assert out_feature in children, "Available children: {}".format(", ".join(children))
 
+        # multi-stage
+        ###############################################################################
+        self.multi_stage = multi_stage
+        ###############################################################################
+            
+
     def forward(self, x):
         outputs = {}
         x = self.stem(x)
@@ -451,6 +457,14 @@ class ResNet(Backbone):
             outputs["stem"] = x
         for stage, name in self.stages_and_names:
             x = stage(x)
+
+            # multi-stage 
+            ###############################################################################
+            if self.multi_stage == name:
+                outputs[self.multi_stage] = x
+                break
+            ###############################################################################
+
             if name in self._out_features:
                 outputs[name] = x
         if self.num_classes is not None:
@@ -462,12 +476,23 @@ class ResNet(Backbone):
         return outputs
 
     def output_shape(self):
-        return {
-            name: ShapeSpec(
-                channels=self._out_feature_channels[name], stride=self._out_feature_strides[name]
-            )
-            for name in self._out_features
-        }
+        # multi-stage
+        ###############################################################################
+        if self.multi_stage is None:
+            return {
+                name: ShapeSpec(
+                    channels=self._out_feature_channels[name], stride=self._out_feature_strides[name]
+                )
+                for name in self._out_features
+            }
+        else:
+            return {
+                self.multi_stage: ShapeSpec(
+                    channels=self._out_feature_channels[self.multi_stage], 
+                    stride=self._out_feature_strides[self.multi_stage]
+                )
+            }
+        ###############################################################################
 
 
 @BACKBONE_REGISTRY.register()
@@ -505,6 +530,14 @@ def build_resnet_backbone(cfg, input_shape):
     deform_on_per_stage = cfg.MODEL.RESNETS.DEFORM_ON_PER_STAGE
     deform_modulated    = cfg.MODEL.RESNETS.DEFORM_MODULATED
     deform_num_groups   = cfg.MODEL.RESNETS.DEFORM_NUM_GROUPS
+
+    # multi-stage
+    ###############################################################################
+    multi_stage         = cfg.MODEL.RESNETS.get('MULTI_STAGE')
+    if multi_stage is not None and depth != 50:
+        raise Exception("Multi-stage technique now is only available for ResNet-50")
+    ###############################################################################
+
     # fmt: on
     assert res5_dilation in {1, 2}, "res5_dilation cannot be {}.".format(res5_dilation)
 
@@ -563,4 +596,4 @@ def build_resnet_backbone(cfg, input_shape):
             for block in blocks:
                 block.freeze()
         stages.append(blocks)
-    return ResNet(stem, stages, out_features=out_features)
+    return ResNet(stem, stages, out_features=out_features, multi_stage=multi_stage)
