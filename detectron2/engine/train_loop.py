@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 
+import os
 import logging
 import numpy as np
 import time
@@ -124,7 +125,16 @@ class TrainerBase:
         self.iter = self.start_iter = start_iter
         self.max_iter = max_iter
 
-        with EventStorage(start_iter) as self.storage:
+        # perf profiling
+        prof_type = os.getenv('DETECTRON2_PROF', 'cpu')
+        def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cpu')
+        prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
+        prof_logger = logging.getLogger('detectron2_prof_train_{}'.format(prof_type))
+        prof_logger.setLevel(logging.INFO)
+        prof_logger.addFilter(logging.FileHandler(
+            './detectron2_prof_train_{}.log'.format(prof_type), 'w'))
+
+        with EventStorage(start_iter) as self.storage, prof_func() as prof:
             try:
                 self.before_train()
                 for self.iter in range(start_iter, max_iter):
@@ -136,6 +146,9 @@ class TrainerBase:
                 raise
             finally:
                 self.after_train()
+
+        # perf profiling logging
+        prof_logger.info(prof.key_averages().table(sort_by=prof_key))
 
     def before_train(self):
         for h in self._hooks:

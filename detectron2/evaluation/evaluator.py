@@ -1,4 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+import os
 import datetime
 import logging
 import time
@@ -128,10 +129,18 @@ def inference_on_dataset(model, data_loader, evaluator):
         evaluator = DatasetEvaluators([])
     evaluator.reset()
 
+    # perf profiling
+    prof_type = os.getenv('DETECTRON2_PROF', 'cpu')
+    def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cpu')
+    prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
+    prof_logger = logging.getLogger('detectron2_prof_test_{}'.format(prof_type))
+    prof_logger.setLevel(logging.INFO)
+    prof_logger.addFilter(logging.FileHandler('./detectron2_prof_test.log', 'w'))
+
     num_warmup = min(5, total - 1)
     start_time = time.perf_counter()
     total_compute_time = 0
-    with inference_context(model), torch.no_grad():
+    with inference_context(model), torch.no_grad(), prof_func() as prof:
         for idx, inputs in enumerate(data_loader):
             if idx == num_warmup:
                 start_time = time.perf_counter()
@@ -156,6 +165,9 @@ def inference_on_dataset(model, data_loader, evaluator):
                     ),
                     n=5,
                 )
+
+    # perf profiling logging
+    prof_logger.info(prof.key_averages().table(sort_by=prof_key))
 
     # Measure the time only for this worker (before the synchronization barrier)
     total_time = time.perf_counter() - start_time
