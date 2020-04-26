@@ -131,11 +131,15 @@ def inference_on_dataset(model, data_loader, evaluator):
 
     # perf profiling
     prof_type = os.getenv('DETECTRON2_PROF', 'cpu')
-    def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cpu')
-    prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
-    prof_logger = logging.getLogger('detectron2_prof_test_{}'.format(prof_type))
-    prof_logger.setLevel(logging.INFO)
-    prof_logger.addFilter(logging.FileHandler('./detectron2_prof_test.log', 'w'))
+
+    def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cuda')
+
+    if prof_type is not None:
+        prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
+        prof_logger = logging.getLogger('detectron2_prof_test_{}'.format(prof_type))
+        prof_logger.setLevel(logging.INFO)
+        prof_logger.addHandler(logging.FileHandler(
+            './detectron2_prof_test_{}.log'.format(prof_type), 'w'))
 
     num_warmup = min(5, total - 1)
     start_time = time.perf_counter()
@@ -167,7 +171,8 @@ def inference_on_dataset(model, data_loader, evaluator):
                 )
 
     # perf profiling logging
-    prof_logger.info(prof.key_averages().table(sort_by=prof_key))
+    if prof_type is not None:
+        prof_logger.info(prof.key_averages().table(sort_by=prof_key))
 
     # Measure the time only for this worker (before the synchronization barrier)
     total_time = time.perf_counter() - start_time

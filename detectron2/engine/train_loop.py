@@ -126,13 +126,16 @@ class TrainerBase:
         self.max_iter = max_iter
 
         # perf profiling
-        prof_type = os.getenv('DETECTRON2_PROF', 'cpu')
-        def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cpu')
-        prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
-        prof_logger = logging.getLogger('detectron2_prof_train_{}'.format(prof_type))
-        prof_logger.setLevel(logging.INFO)
-        prof_logger.addFilter(logging.FileHandler(
-            './detectron2_prof_train_{}.log'.format(prof_type), 'w'))
+        prof_type = os.getenv('DETECTRON2_PROF', None)
+
+        def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cuda')
+
+        if prof_type is not None:
+            prof_key = '{}_time_total'.format(prof_type if prof_type == 'cpu' else 'cuda')
+            prof_logger = logging.getLogger('detectron2_prof_train_{}'.format(prof_type))
+            prof_logger.setLevel(logging.INFO)
+            prof_logger.addHandler(logging.FileHandler(
+                './detectron2_prof_train_{}.log'.format(prof_type), 'w'))
 
         with EventStorage(start_iter) as self.storage, prof_func() as prof:
             try:
@@ -148,7 +151,8 @@ class TrainerBase:
                 self.after_train()
 
         # perf profiling logging
-        prof_logger.info(prof.key_averages().table(sort_by=prof_key))
+        if prof_type is not None:
+            prof_logger.info(prof.key_averages().table(sort_by=prof_key))
 
     def before_train(self):
         for h in self._hooks:
