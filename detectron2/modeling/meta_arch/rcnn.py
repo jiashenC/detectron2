@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import logging
 import numpy as np
+import time
 import torch
 from torch import nn
 
@@ -81,7 +82,7 @@ class GeneralizedRCNN(nn.Module):
             storage.put_image(vis_name, vis_img)
             break  # only visualize one image in a batch
 
-    def forward(self, batched_inputs):
+    def forward(self, batched_inputs, **kwargs):
         """
         Args:
             batched_inputs: a list, batched outputs of :class:`DatasetMapper` .
@@ -105,7 +106,7 @@ class GeneralizedRCNN(nn.Module):
                 "pred_boxes", "pred_classes", "scores", "pred_masks", "pred_keypoints"
         """
         if not self.training:
-            return self.inference(batched_inputs)
+            return self.inference(batched_inputs, timer=kwargs.get('timer', None))
 
         images = self.preprocess_image(batched_inputs)
         if "instances" in batched_inputs[0]:
@@ -138,7 +139,7 @@ class GeneralizedRCNN(nn.Module):
         losses.update(proposal_losses)
         return losses
 
-    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True):
+    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True, timer=None):
         """
         Run inference on the given inputs.
 
@@ -157,7 +158,10 @@ class GeneralizedRCNN(nn.Module):
         """
         assert not self.training
 
+        preprocess_start = time.perf_counter()
         images = self.preprocess_image(batched_inputs)
+        preprocess_total = time.perf_counter() - preprocess_start
+
         features = self.backbone(images.tensor)
 
         if detected_instances is None:
@@ -172,10 +176,16 @@ class GeneralizedRCNN(nn.Module):
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
+        postprocess_start = time.perf_counter()
         if do_postprocess:
-            return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
-        else:
-            return results
+            results = GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
+        postprocess_total = time.perf_counter() - postprocess_start
+
+        if timer is not None:
+            timer[0] += preprocess_total
+            timer[1] += postprocess_total
+
+        return results
 
     def preprocess_image(self, batched_inputs):
         """

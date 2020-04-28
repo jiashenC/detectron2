@@ -144,6 +144,10 @@ def inference_on_dataset(model, data_loader, evaluator):
     num_warmup = min(5, total - 1)
     start_time = time.perf_counter()
     total_compute_time = 0
+    
+    # perf profiling: add timer for pre, and post-processing
+    timer = [0, 0]
+
     with inference_context(model), torch.no_grad(), prof_func() as prof:
         for idx, inputs in enumerate(data_loader):
             if idx == num_warmup:
@@ -151,7 +155,7 @@ def inference_on_dataset(model, data_loader, evaluator):
                 total_compute_time = 0
 
             start_compute_time = time.perf_counter()
-            outputs = model(inputs)
+            outputs = model(inputs, timer=timer)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             total_compute_time += time.perf_counter() - start_compute_time
@@ -189,6 +193,7 @@ def inference_on_dataset(model, data_loader, evaluator):
             total_compute_time_str, total_compute_time / (total - num_warmup), num_devices
         )
     )
+    logger.info("Pre-processing time: {:.2f} s, Post-processing time: {:.2f}".format(timer[0], timer[1]))
 
     results = evaluator.evaluate()
     # An evaluator may return None when not in main process.
