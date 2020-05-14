@@ -457,16 +457,16 @@ class ResNet(Backbone):
 
         # multi-stage
         ###############################################################################
-        if self.multi_stage == "stem":
+        if self.multi_stage == "stem" and not self.training:
             return outputs
         ###############################################################################
 
         for stage, name in self.stages_and_names:
             x = stage(x)
 
-            # multi-stage 
+            # multi-stage
             ###############################################################################
-            if self.multi_stage == name:
+            if self.multi_stage == name and not self.training:
                 outputs[self.multi_stage] = x
                 break
             ###############################################################################
@@ -484,7 +484,7 @@ class ResNet(Backbone):
     def output_shape(self):
         # multi-stage
         ###############################################################################
-        if self.multi_stage is None:
+        if self.multi_stage is None or self.training:
             return {
                 name: ShapeSpec(
                     channels=self._out_feature_channels[name], stride=self._out_feature_strides[name]
@@ -494,7 +494,7 @@ class ResNet(Backbone):
         else:
             return {
                 self.multi_stage: ShapeSpec(
-                    channels=self._out_feature_channels[self.multi_stage], 
+                    channels=self._out_feature_channels[self.multi_stage],
                     stride=self._out_feature_strides[self.multi_stage]
                 )
             }
@@ -524,22 +524,22 @@ def build_resnet_backbone(cfg, input_shape):
         stem = FrozenBatchNorm2d.convert_frozen_batchnorm(stem)
 
     # fmt: off
-    out_features        = cfg.MODEL.RESNETS.OUT_FEATURES
-    depth               = cfg.MODEL.RESNETS.DEPTH
-    num_groups          = cfg.MODEL.RESNETS.NUM_GROUPS
-    width_per_group     = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
+    out_features = cfg.MODEL.RESNETS.OUT_FEATURES
+    depth = cfg.MODEL.RESNETS.DEPTH
+    num_groups = cfg.MODEL.RESNETS.NUM_GROUPS
+    width_per_group = cfg.MODEL.RESNETS.WIDTH_PER_GROUP
     bottleneck_channels = num_groups * width_per_group
-    in_channels         = cfg.MODEL.RESNETS.STEM_OUT_CHANNELS
-    out_channels        = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS
-    stride_in_1x1       = cfg.MODEL.RESNETS.STRIDE_IN_1X1
-    res5_dilation       = cfg.MODEL.RESNETS.RES5_DILATION
+    in_channels = cfg.MODEL.RESNETS.STEM_OUT_CHANNELS
+    out_channels = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS
+    stride_in_1x1 = cfg.MODEL.RESNETS.STRIDE_IN_1X1
+    res5_dilation = cfg.MODEL.RESNETS.RES5_DILATION
     deform_on_per_stage = cfg.MODEL.RESNETS.DEFORM_ON_PER_STAGE
-    deform_modulated    = cfg.MODEL.RESNETS.DEFORM_MODULATED
-    deform_num_groups   = cfg.MODEL.RESNETS.DEFORM_NUM_GROUPS
+    deform_modulated = cfg.MODEL.RESNETS.DEFORM_MODULATED
+    deform_num_groups = cfg.MODEL.RESNETS.DEFORM_NUM_GROUPS
 
     # multi-stage
     ###############################################################################
-    multi_stage         = cfg.MODEL.RESNETS.get('MULTI_STAGE')
+    multi_stage = cfg.MODEL.RESNETS.get("MULTI_STAGE")
     if multi_stage is not None and depth != 50:
         raise Exception("Multi-stage technique now is only available for ResNet-50")
     ###############################################################################
@@ -567,7 +567,7 @@ def build_resnet_backbone(cfg, input_shape):
 
     # Avoid creating variables without gradients
     # It consumes extra memory and may cause allreduce to fail
-    out_stage_idx = [{"res2": 2, "res3": 3, "res4": 4, "res5": 5}[f] for f in out_features]
+    out_stage_idx = [{"stem": 1, "res2": 2, "res3": 3, "res4": 4, "res5": 5}[f] for f in out_features]
     max_stage_idx = max(out_stage_idx)
     for idx, stage_idx in enumerate(range(2, max_stage_idx + 1)):
         dilation = res5_dilation if stage_idx == 5 else 1

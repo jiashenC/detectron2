@@ -31,9 +31,24 @@ class GeneralizedRCNN(nn.Module):
         super().__init__()
 
         self.device = torch.device(cfg.MODEL.DEVICE)
+
+        # multi-stage
+        ###############################################################################
+        self.multi_stage = cfg.MODEL.RESNETS.get("MULTI_STAGE")
         self.backbone = build_backbone(cfg)
-        self.proposal_generator = build_proposal_generator(cfg, self.backbone.output_shape())
-        self.roi_heads = build_roi_heads(cfg, self.backbone.output_shape())
+
+        if self.multi_stage is not None:
+            self.proposal_generator = nn.ModuleList([])
+            self.roi_heads = nn.ModuleList([])
+            for out in ["stem", "res2", "res3", "res4", "res5"]:
+                output_shape = {out: self.backbone.output_shape()[out]}
+                self.proposal_generator.append(build_proposal_generator(cfg, output_shape))
+                self.roi_heads.append(build_roi_heads(cfg, output_shape))
+        else:
+            self.proposal_generator = build_proposal_generator(cfg, self.backbone.output_shape())
+            self.roi_heads = build_roi_heads(cfg, self.backbone.output_shape())
+        ##############################################################################
+
         self.vis_period = cfg.VIS_PERIOD
         self.input_format = cfg.INPUT.FORMAT
 
@@ -121,18 +136,53 @@ class GeneralizedRCNN(nn.Module):
 
         features = self.backbone(images.tensor)
 
+        # multi-stage
+        ###############################################################################
         if self.proposal_generator:
-            proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
+            if self.multi_stage is not None:
+                proposals, proposal_losses = {}, {}
+                for i, mod in enumerate(["stem", "res2", "res3", "res4", "res5"]):
+                    prop, prop_loss = self.proposal_generator[i](
+                        images, {mod: features[mod]}, gt_instances)
+                    for k, v in prop_loss.items():
+                        if k not in proposal_losses:
+                            proposal_losses[k] = []
+                        proposal_losses[k].append(v)
+                    proposals[mod] = prop
+            else:
+                proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
         else:
             assert "proposals" in batched_inputs[0]
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
             proposal_losses = {}
 
-        _, detector_losses = self.roi_heads(images, features, proposals, gt_instances)
+        if self.multi_stage is not None:
+            detector_losses = {}
+            for i, mod in enumerate(["stem", "res2", "res3", "res4", "res5"]):
+                _, dect_loss = self.roi_heads[i](
+                    images, {mod: features[mod]}, proposals[mod], gt_instances)
+                for k, v in dect_loss.items():
+                    if k not in detector_losses:
+                        detector_losses[k] = []
+                    detector_losses[k].append(v)
+        else:
+            _, detector_losses = self.roi_heads(images, features, proposals, gt_instances)
+
+        tmp_detector_losses = {}
+        for k, v in detector_losses.items():
+            tmp_detector_losses[k] = torch.mean(torch.stack(v), dim=0)
+        detector_losses = tmp_detector_losses
+
+        tmp_proposal_losses = {}
+        for k, v in proposal_losses.items():
+            tmp_proposal_losses[k] = torch.mean(torch.stack(v), dim=0)
+        proposal_losses = tmp_proposal_losses
+
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
                 self.visualize_training(batched_inputs, proposals)
+        ###############################################################################
 
         losses = {}
         losses.update(detector_losses)
@@ -164,14 +214,22 @@ class GeneralizedRCNN(nn.Module):
 
         features = self.backbone(images.tensor)
 
+        # multi-stage 
+        ###############################################################################
         if detected_instances is None:
             if self.proposal_generator:
-                proposals, _ = self.proposal_generator(images, features, None)
+                if self.multi_stage is not None:
+                    proposals, _ = self.proposal_generator[self.multi_stage](images, features, None)
+                else:
+                    proposals, _ = self.proposal_generator(images, features, None)
             else:
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-            results, _ = self.roi_heads(images, features, proposals, None)
+            if self.multi_stage is not None:
+                results, _ = self.roi_heads[self.multi_stage](images, features, proposals, None)
+            else:
+                results, _ = self.roi_heads(images, features, proposals, None)
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
@@ -184,6 +242,7 @@ class GeneralizedRCNN(nn.Module):
         if timer is not None:
             timer[0] += preprocess_total
             timer[1] += postprocess_total
+        ###############################################################################
 
         return results
 
