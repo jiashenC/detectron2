@@ -41,6 +41,8 @@ class GeneralizedRCNN(nn.Module):
             self.proposal_generator = nn.ModuleList([])
             self.roi_heads = nn.ModuleList([])
             for out in ["stem", "res2", "res3", "res4", "res5"]:
+                cfg.MODEL.RPN.IN_FEATURES = [out]
+                cfg.MODEL.ROI_HEADS.IN_FEATURES = [out]
                 output_shape = {out: self.backbone.output_shape()[out]}
                 self.proposal_generator.append(build_proposal_generator(cfg, output_shape))
                 self.roi_heads.append(build_roi_heads(cfg, output_shape))
@@ -170,12 +172,12 @@ class GeneralizedRCNN(nn.Module):
 
         tmp_detector_losses = {}
         for k, v in detector_losses.items():
-            tmp_detector_losses[k] = torch.mean(torch.stack(v), dim=0)
+            tmp_detector_losses[k] = torch.sum(torch.stack(v), dim=0)
         detector_losses = tmp_detector_losses
 
         tmp_proposal_losses = {}
         for k, v in proposal_losses.items():
-            tmp_proposal_losses[k] = torch.mean(torch.stack(v), dim=0)
+            tmp_proposal_losses[k] = torch.sum(torch.stack(v), dim=0)
         proposal_losses = tmp_proposal_losses
 
         if self.vis_period > 0:
@@ -219,7 +221,8 @@ class GeneralizedRCNN(nn.Module):
         if detected_instances is None:
             if self.proposal_generator:
                 if self.multi_stage is not None:
-                    proposals, _ = self.proposal_generator[self.multi_stage](images, features, None)
+                    idx = {"stem": 0, "res2": 1, "res3": 2, "res4": 3, "res5": 4}[self.multi_stage]
+                    proposals, _ = self.proposal_generator[idx](images, features, None)
                 else:
                     proposals, _ = self.proposal_generator(images, features, None)
             else:
@@ -227,7 +230,8 @@ class GeneralizedRCNN(nn.Module):
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
             if self.multi_stage is not None:
-                results, _ = self.roi_heads[self.multi_stage](images, features, proposals, None)
+                idx = {"stem": 0, "res2": 1, "res3": 2, "res4": 3, "res5": 4}[self.multi_stage]
+                results, _ = self.roi_heads[idx](images, features, proposals, None)
             else:
                 results, _ = self.roi_heads(images, features, proposals, None)
         else:
