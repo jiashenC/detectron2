@@ -448,13 +448,19 @@ class ResNet(Backbone):
         ###############################################################################
         self.multi_stage = multi_stage
         ###############################################################################
-            
 
     def forward(self, x):
         outputs = {}
         x = self.stem(x)
         if "stem" in self._out_features:
             outputs["stem"] = x
+
+        # multi-stage
+        ###############################################################################
+        if self.multi_stage == "stem":
+            return outputs
+        ###############################################################################
+
         for stage, name in self.stages_and_names:
             x = stage(x)
 
