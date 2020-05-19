@@ -130,7 +130,7 @@ def inference_on_dataset(model, data_loader, evaluator):
     evaluator.reset()
 
     # perf profiling
-    prof_type = os.getenv('DETECTRON2_PROF', 'cpu')
+    prof_type = os.getenv('DETECTRON2_PROF', None)
 
     def prof_func(): return torch.autograd.profiler.profile(use_cuda=prof_type == 'cuda')
 
@@ -148,8 +148,10 @@ def inference_on_dataset(model, data_loader, evaluator):
     # perf profiling: add timer for pre, and post-processing
     timer = [0, 0]
 
+    loading_start, loading_time = time.perf_counter(), 0
     with inference_context(model), torch.no_grad(), prof_func() as prof:
         for idx, inputs in enumerate(data_loader):
+            loading_time += time.perf_counter() - loading_start
             if idx == num_warmup:
                 start_time = time.perf_counter()
                 total_compute_time = 0
@@ -173,6 +175,7 @@ def inference_on_dataset(model, data_loader, evaluator):
                     ),
                     n=5,
                 )
+            loading_start = time.perf_counter()
 
     # perf profiling logging
     if prof_type is not None:
@@ -200,6 +203,9 @@ def inference_on_dataset(model, data_loader, evaluator):
     # Replace it by an empty dict instead to make it easier for downstream code to handle
     if results is None:
         results = {}
+    results['pre_processing_time'] = timer[0]
+    results['post_processing_time'] = timer[1]
+    results['loading_time'] = loading_time
     results['compute_time'] = total_compute_time
     results['inference_time'] = total_time
     return results
