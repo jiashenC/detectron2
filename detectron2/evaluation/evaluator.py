@@ -200,6 +200,8 @@ def inference_on_dataset(model, data_loader, evaluator):
     # Replace it by an empty dict instead to make it easier for downstream code to handle
     if results is None:
         results = {}
+    results['compute_time'] = total_compute_time
+    results['inference_time'] = total_time
     return results
 
 

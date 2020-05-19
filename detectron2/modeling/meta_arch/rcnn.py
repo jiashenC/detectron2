@@ -141,7 +141,7 @@ class GeneralizedRCNN(nn.Module):
         # multi-stage
         ###############################################################################
         if self.proposal_generator:
-            if self.multi_stage is not None:
+            if self.multi_stage is not None and self.multi_stage == "all":
                 proposals, proposal_losses = {}, {}
                 for i, mod in enumerate(["stem", "res2", "res3", "res4", "res5"]):
                     prop, prop_loss = self.proposal_generator[i](
@@ -151,6 +151,10 @@ class GeneralizedRCNN(nn.Module):
                             proposal_losses[k] = []
                         proposal_losses[k].append(v)
                     proposals[mod] = prop
+            elif self.multi_stage is not None:
+                idx = {"stem": 0, "res2": 1, "res3": 2, "res4": 3, "res5": 4}[self.multi_stage]
+                proposals, proposal_losses = self.proposal_generator[idx](
+                    images, features, gt_instances)
             else:
                 proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
         else:
@@ -158,7 +162,7 @@ class GeneralizedRCNN(nn.Module):
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
             proposal_losses = {}
 
-        if self.multi_stage is not None:
+        if self.multi_stage is not None and self.multi_stage == "all":
             detector_losses = {}
             for i, mod in enumerate(["stem", "res2", "res3", "res4", "res5"]):
                 _, dect_loss = self.roi_heads[i](
@@ -167,18 +171,22 @@ class GeneralizedRCNN(nn.Module):
                     if k not in detector_losses:
                         detector_losses[k] = []
                     detector_losses[k].append(v)
+        elif self.multi_stage is not None:
+            idx = {"stem": 0, "res2": 1, "res3": 2, "res4": 3, "res5": 4}[self.multi_stage]
+            _, detector_losses = self.roi_heads[idx](images, features, proposals, gt_instances)
         else:
             _, detector_losses = self.roi_heads(images, features, proposals, gt_instances)
 
-        tmp_detector_losses = {}
-        for k, v in detector_losses.items():
-            tmp_detector_losses[k] = torch.sum(torch.stack(v), dim=0)
-        detector_losses = tmp_detector_losses
+        if self.multi_stage is not None and self.multi_stage == "all":
+            tmp_detector_losses = {}
+            for k, v in detector_losses.items():
+                tmp_detector_losses[k] = torch.sum(torch.stack(v), dim=0)
+            detector_losses = tmp_detector_losses
 
-        tmp_proposal_losses = {}
-        for k, v in proposal_losses.items():
-            tmp_proposal_losses[k] = torch.sum(torch.stack(v), dim=0)
-        proposal_losses = tmp_proposal_losses
+            tmp_proposal_losses = {}
+            for k, v in proposal_losses.items():
+                tmp_proposal_losses[k] = torch.sum(torch.stack(v), dim=0)
+            proposal_losses = tmp_proposal_losses
 
         if self.vis_period > 0:
             storage = get_event_storage()
@@ -216,7 +224,7 @@ class GeneralizedRCNN(nn.Module):
 
         features = self.backbone(images.tensor)
 
-        # multi-stage 
+        # multi-stage
         ###############################################################################
         if detected_instances is None:
             if self.proposal_generator:
